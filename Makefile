@@ -25,9 +25,9 @@ DBGCFLAGS = -g -O0
 $(ODIR)/%.o: $(SRCDIR)/%.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS) $(DBGCFLAGS)
 
-all: bootloader
+all: bootload
 
-bootloader: $(OBJ)
+bootload: $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS) -L$(LDIR) $(LIBS)
 
 .PHONY: clean
