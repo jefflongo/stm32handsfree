@@ -7,11 +7,11 @@
 // FT232R write logic:
 // Upper nybble: pin directions (0 == input, 1 == output)
 // Bit 7 Bit 6 Bit 5 Bit 4
-// CBUS4 CBUS3 CBUS2 CBUS1
+// CBUS3 CBUS2 CBUS1 CBUS0
 //
 // Lower nybble: pin states (0 == low, 1 == high)
 // Bit 3 Bit 2 Bit 1 Bit 0
-// CBUS4 CBUS3 CBUS2 CBUS1
+// CBUS3 CBUS2 CBUS1 CBUS0
 //
 // Configuration:
 // CBUS0 -> unused
@@ -43,7 +43,7 @@ static FT_STATUS enter_bootloader(void) {
     usleep(TRANSITION_DELAY);
     // BOOT0: 1
     // RESET: 1
-    if (ok == FT_OK) ok = ft_write(0xCF);
+    if (ok == FT_OK) ok = ft_write(0x4F);
     ok = FT_Close(ft_handle);
 
     return ok;
@@ -54,7 +54,7 @@ static FT_STATUS exit_bootloader(void) {
     if (ok != FT_OK) return ok;
     // BOOT0: 0
     // RESET: 1
-    if (ok == FT_OK) ok = ft_write(0xCB);
+    if (ok == FT_OK) ok = ft_write(0x4B);
     usleep(TRANSITION_DELAY);
     // BOOT0: 0
     // RESET: 0
@@ -62,7 +62,7 @@ static FT_STATUS exit_bootloader(void) {
     usleep(TRANSITION_DELAY);
     // BOOT0: 0
     // RESET: 1
-    if (ok == FT_OK) ok = ft_write(0xCB);
+    if (ok == FT_OK) ok = ft_write(0x4B);
     // BOOT0 -> INPUT
     // RESET -> INPUT
     if (ok == FT_OK) ok = ft_write(0x0F);
