@@ -30,9 +30,12 @@ static inline FT_STATUS ft_write(UCHAR data) {
     return FT_SetBitMode(ft_handle, data, FT_MODE_ENABLE);
 }
 
-static FT_STATUS enter_bootloader(void) {
+static FT_STATUS enter_bootloader(LPLONG port_number_ptr) {
     FT_STATUS ok = FT_Open(0, &ft_handle);
     if (ok != FT_OK) return ok;
+    // Find serial port
+    if (ok == FT_OK) ok = FT_GetComPortNumber(ft_handle, port_number_ptr);
+
     // BOOT0: 0
     // RESET: 0
     if (ok == FT_OK) ok = ft_write(0xC3);
@@ -77,15 +80,12 @@ static FT_STATUS exit_bootloader(void) {
 #define FLASH_WRITE_ADDR " 0x08000000"
 #define FLASH_VERIFY_ARG " -v"
 
-int main(int argc, char** argv) {
-    // Parse and build STM32CubeProgrammer command
-    if (argc != 3) {
-        printf("usage: <serial port> <path/to/binary>");
-        return -1;
-    }
+char* parse(LONG port_number, char* binary_path) {
+    char port[5];
+    snprintf(port, sizeof(port), "COM%d", (int)port_number);
     int command_size = strlen(FLASH_PROGRAM FLASH_CONNECT_ARG FLASH_WRITE_ARG
                                 FLASH_WRITE_ADDR FLASH_VERIFY_ARG) +
-                       strlen(argv[1]) + strlen(argv[2]) +
+                       strlen(port) + strlen(binary_path) +
                        1; // Plus 1 for null terminator
     char* command = (char*)malloc(command_size);
     snprintf(
@@ -94,15 +94,35 @@ int main(int argc, char** argv) {
       "%s%s%s%s%s%s%s",
       FLASH_PROGRAM,
       FLASH_CONNECT_ARG,
-      argv[1],
+      port,
       FLASH_WRITE_ARG,
-      argv[2],
+      binary_path,
       FLASH_WRITE_ADDR,
       FLASH_VERIFY_ARG);
 
+    return command;
+}
+
+int main(int argc, char** argv) {
+    // Parse and build STM32CubeProgrammer command
+    if (argc != 2) {
+        printf("usage: <path/to/binary>");
+        return -1;
+    }
+
     // Program target
     FT_STATUS status;
-    status = enter_bootloader();
+    LONG port_number;
+    status = enter_bootloader(&port_number);
+    if (status != FT_OK) {
+        printf("Failed to enter bootloader mode.\n");
+        return -1;
+    }
+    if (port_number == -1) {
+        printf("No device detected.\n");
+        return -1;
+    }
+    char* command = parse(port_number, argv[1]);
     system(command);
     free(command);
     status = exit_bootloader();
