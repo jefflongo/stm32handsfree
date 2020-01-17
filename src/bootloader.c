@@ -30,48 +30,69 @@ static inline FT_STATUS ft_write(UCHAR data) {
     return FT_SetBitMode(ft_handle, data, FT_MODE_ENABLE);
 }
 
-static FT_STATUS enter_bootloader(LPLONG port_number_ptr) {
-    FT_STATUS ok = FT_Open(0, &ft_handle);
-    if (ok != FT_OK) return ok;
-    // Find serial port
-    if (ok == FT_OK) ok = FT_GetComPortNumber(ft_handle, port_number_ptr);
+static FT_STATUS find_device(char** dev) {
+    FT_STATUS status = FT_Open(0, &ft_handle);
+    if (status != FT_OK) return status;
 
+#ifdef _WIN32
+#define COM_PORT_MAX_LENGTH 7 // COMXYZ + null terminator
+    LONG port;
+    status = FT_GetComPortNumber(ft_handle, &port);
+    if (status != FT_OK) return status;
+    if (port == -1) return FT_DEVICE_NOT_FOUND;
+    *dev = (char*)malloc(COM_PORT_MAX_LENGTH * sizeof(char));
+    snprintf(*dev, sizeof(*dev), "COM%d", (int)port);
+#elif __linux__
+// TODO: add linux support
+#error Linux is not currently supported.
+#else
+#error OS not supported.
+#endif
+
+    status = FT_Close(ft_handle);
+
+    return status;
+}
+
+static FT_STATUS enter_bootloader(void) {
+    FT_STATUS status = FT_Open(0, &ft_handle);
+    if (status != FT_OK) return status;
     // BOOT0: 0
     // RESET: 0
-    if (ok == FT_OK) ok = ft_write(0xC3);
+    if (status == FT_OK) status = ft_write(0xC3);
     usleep(TRANSITION_DELAY);
     // BOOT0: 1
     // RESET: 0
-    if (ok == FT_OK) ok = ft_write(0xC7);
+    if (status == FT_OK) status = ft_write(0xC7);
     usleep(TRANSITION_DELAY);
     // BOOT0: 1
     // RESET: 1
-    if (ok == FT_OK) ok = ft_write(0x4F);
-    ok = FT_Close(ft_handle);
+    if (status == FT_OK) status = ft_write(0x4F);
+    status = FT_Close(ft_handle);
 
-    return ok;
+    return status;
 }
 
 static FT_STATUS exit_bootloader(void) {
-    FT_STATUS ok = FT_Open(0, &ft_handle);
-    if (ok != FT_OK) return ok;
+    FT_STATUS status = FT_Open(0, &ft_handle);
+    if (status != FT_OK) return status;
     // BOOT0: 0
     // RESET: 1
-    if (ok == FT_OK) ok = ft_write(0x4B);
+    if (status == FT_OK) status = ft_write(0x4B);
     usleep(TRANSITION_DELAY);
     // BOOT0: 0
     // RESET: 0
-    if (ok == FT_OK) ok = ft_write(0xC3);
+    if (status == FT_OK) status = ft_write(0xC3);
     usleep(TRANSITION_DELAY);
     // BOOT0: 0
     // RESET: 1
-    if (ok == FT_OK) ok = ft_write(0x4B);
+    if (status == FT_OK) status = ft_write(0x4B);
     // BOOT0 -> INPUT
     // RESET -> INPUT
-    if (ok == FT_OK) ok = ft_write(0x0F);
-    ok = FT_Close(ft_handle);
+    if (status == FT_OK) status = ft_write(0x0F);
+    status = FT_Close(ft_handle);
 
-    return ok;
+    return status;
 }
 
 #define FLASH_PROGRAM "STM32_programmer_cli.exe"
@@ -80,21 +101,19 @@ static FT_STATUS exit_bootloader(void) {
 #define FLASH_WRITE_ADDR " 0x08000000"
 #define FLASH_VERIFY_ARG " -v"
 
-char* parse(LONG port_number, char* binary_path) {
-    char port[5];
-    snprintf(port, sizeof(port), "COM%d", (int)port_number);
+char* parse(char* dev, char* binary_path) {
     int command_size = strlen(FLASH_PROGRAM FLASH_CONNECT_ARG FLASH_WRITE_ARG
                                 FLASH_WRITE_ADDR FLASH_VERIFY_ARG) +
-                       strlen(port) + strlen(binary_path) +
+                       strlen(dev) + strlen(binary_path) +
                        1; // Plus 1 for null terminator
-    char* command = (char*)malloc(command_size);
+    char* command = (char*)malloc(command_size * sizeof(char));
     snprintf(
       command,
       command_size,
       "%s%s%s%s%s%s%s",
       FLASH_PROGRAM,
       FLASH_CONNECT_ARG,
-      port,
+      dev,
       FLASH_WRITE_ARG,
       binary_path,
       FLASH_WRITE_ADDR,
@@ -104,28 +123,31 @@ char* parse(LONG port_number, char* binary_path) {
 }
 
 int main(int argc, char** argv) {
-    // Parse and build STM32CubeProgrammer command
+    char* dev;
+    char* command;
+
     if (argc != 2) {
-        printf("usage: <path/to/binary>");
+        fprintf(stderr, "usage: <path/to/binary>");
+        return -1;
+    }
+    if (find_device(&dev) != FT_OK) {
+        fprintf(stderr, "Failed to find device");
+        return -1;
+    }
+    if (enter_bootloader() != FT_OK) {
+        fprintf(stderr, "Failed to enter bootloader mode");
         return -1;
     }
 
-    // Program target
-    FT_STATUS status;
-    LONG port_number;
-    status = enter_bootloader(&port_number);
-    if (status != FT_OK) {
-        printf("Failed to enter bootloader mode.\n");
-        return -1;
-    }
-    if (port_number == -1) {
-        printf("No device detected.\n");
-        return -1;
-    }
-    char* command = parse(port_number, argv[1]);
+    command = parse(dev, argv[1]);
     system(command);
+    free(dev);
     free(command);
-    status = exit_bootloader();
 
-    return status == FT_OK ? 0 : -1;
+    if (exit_bootloader() != FT_OK) {
+        fprintf(stderr, "Failed to exit bootloader mode");
+        return -1;
+    }
+
+    return 0;
 }
