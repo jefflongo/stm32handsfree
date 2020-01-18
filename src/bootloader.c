@@ -1,7 +1,13 @@
+#ifdef _WIN32
 #include "ftd2xx.h"
+#elif __linux__
+#include "ftdi.h"
+#include <libusb-1.0/libusb.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 // FT232R write logic:
@@ -21,17 +27,46 @@
 
 #define TRANSITION_DELAY 2000 // microseconds
 
-#define FT_MODE_ENABLE 0x20
-#define FT_MODE_RESET 0x00
+#ifdef _WIN32
+#define BITMODE_CBUS 0x20
 
 static FT_HANDLE ft_handle;
 
-static inline FT_STATUS ft_write(UCHAR data) {
-    return FT_SetBitMode(ft_handle, data, FT_MODE_ENABLE);
+static inline int dev_open(void) {
+    return FT_Open(0, &ft_handle);
 }
 
-static FT_STATUS find_device(char** dev) {
-    FT_STATUS status = FT_Open(0, &ft_handle);
+static inline int dev_close(void) {
+    return FT_Close(ft_handle);
+}
+
+static inline int dev_write(unsigned char data) {
+    return FT_SetBitMode(ft_handle, data, BITMODE_CBUS);
+}
+#elif __linux__
+#define FT232_VID 0x0403
+#define FT232_PID 0x6001
+#define FT_OK 0
+
+static struct ftdi_context ft_handle;
+
+static inline int dev_open(void) {
+    return ftdi_usb_open(&ft_handle, FT232_VID, FT232_PID);
+}
+
+static inline int dev_close(void) {
+    return ftdi_usb_close(&ft_handle);
+}
+
+static inline int dev_write(unsigned char data) {
+    return ftdi_set_bitmode(&ft_handle, data, BITMODE_CBUS);
+}
+#else
+#error OS not supported
+#endif
+
+static int find_device(char** dev) {
+    int status = dev_open();
     if (status != FT_OK) return status;
 
 #ifdef _WIN32
@@ -43,59 +78,58 @@ static FT_STATUS find_device(char** dev) {
     *dev = (char*)malloc(COM_PORT_MAX_LENGTH * sizeof(char));
     snprintf(*dev, sizeof(*dev), "COM%d", (int)port);
 #elif __linux__
-// TODO: add linux support
-#error Linux is not currently supported.
-#else
-#error OS not supported.
+    *dev = "/dev/ttyUSB0";
 #endif
+    status = dev_close();
+    return status;
+}
 
-    status = FT_Close(ft_handle);
+static int enter_bootloader(void) {
+    int status = dev_open();
+    if (status != FT_OK) return status;
+    // BOOT0: 0
+    // RESET: 0
+    if (status == FT_OK) status = dev_write(0xC3);
+    usleep(TRANSITION_DELAY);
+    // BOOT0: 1
+    // RESET: 0
+    if (status == FT_OK) status = dev_write(0xC7);
+    usleep(TRANSITION_DELAY);
+    // BOOT0: 1
+    // RESET: 1
+    if (status == FT_OK) status = dev_write(0x4F);
+    status = dev_close();
 
     return status;
 }
 
-static FT_STATUS enter_bootloader(void) {
-    FT_STATUS status = FT_Open(0, &ft_handle);
-    if (status != FT_OK) return status;
-    // BOOT0: 0
-    // RESET: 0
-    if (status == FT_OK) status = ft_write(0xC3);
-    usleep(TRANSITION_DELAY);
-    // BOOT0: 1
-    // RESET: 0
-    if (status == FT_OK) status = ft_write(0xC7);
-    usleep(TRANSITION_DELAY);
-    // BOOT0: 1
-    // RESET: 1
-    if (status == FT_OK) status = ft_write(0x4F);
-    status = FT_Close(ft_handle);
-
-    return status;
-}
-
-static FT_STATUS exit_bootloader(void) {
-    FT_STATUS status = FT_Open(0, &ft_handle);
+static int exit_bootloader(void) {
+    int status = dev_open();
     if (status != FT_OK) return status;
     // BOOT0: 0
     // RESET: 1
-    if (status == FT_OK) status = ft_write(0x4B);
+    if (status == FT_OK) status = dev_write(0x4B);
     usleep(TRANSITION_DELAY);
     // BOOT0: 0
     // RESET: 0
-    if (status == FT_OK) status = ft_write(0xC3);
+    if (status == FT_OK) status = dev_write(0xC3);
     usleep(TRANSITION_DELAY);
     // BOOT0: 0
     // RESET: 1
-    if (status == FT_OK) status = ft_write(0x4B);
+    if (status == FT_OK) status = dev_write(0x4B);
     // BOOT0 -> INPUT
     // RESET -> INPUT
-    if (status == FT_OK) status = ft_write(0x0F);
-    status = FT_Close(ft_handle);
+    if (status == FT_OK) status = dev_write(0x0F);
+    status = dev_close();
 
     return status;
 }
 
-#define FLASH_PROGRAM "STM32_programmer_cli.exe"
+#ifdef _WIN32
+#define FLASH_PROGRAM "STM32_Programmer_CLI.exe"
+#elif __linux__
+#define FLASH_PROGRAM "STM32_Programmer_CLI"
+#endif
 #define FLASH_CONNECT_ARG " -c port="
 #define FLASH_WRITE_ARG " -w "
 #define FLASH_WRITE_ADDR " 0x08000000"
@@ -141,7 +175,7 @@ int main(int argc, char** argv) {
 
     command = parse(dev, argv[1]);
     system(command);
-    free(dev);
+    //free(dev);
     free(command);
 
     if (exit_bootloader() != FT_OK) {

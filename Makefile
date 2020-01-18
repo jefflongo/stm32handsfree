@@ -9,7 +9,8 @@ _DEPS = ftd2xx.h
 DEPS = $(patsubst %,$(IDIR)/%,$(_DEPS))
 
 # Libraries
-LIBS = -lftd2xx
+# LIBS = -lftd2xx
+LIBS = -lftdi -lusb-1.0
 
 # Object files
 _OBJ = bootloader.o
