@@ -12,13 +12,12 @@
 #include <unistd.h>
 
 // FT232R write logic:
-// Upper nybble: pin directions (0 == input, 1 == output)
-// Bit 7 Bit 6 Bit 5 Bit 4
-// CBUS3 CBUS2 CBUS1 CBUS0
 //
-// Lower nybble: pin states (0 == low, 1 == high)
-// Bit 3 Bit 2 Bit 1 Bit 0
-// CBUS3 CBUS2 CBUS1 CBUS0
+// CBUS bits
+// 3210 3210
+// xxxx xxxx
+// |    |------ Output state:  0 -> low,   1 -> high
+// |----------- Pin direction: 0 -> input, 1 -> output
 //
 // Configuration:
 // CBUS0 -> unused
